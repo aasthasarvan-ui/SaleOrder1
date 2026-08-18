@@ -11,7 +11,7 @@ st.set_page_config(
     layout="centered"
 )
 
-# Custom CSS for Modern UI
+# Custom CSS for Modern UI & Button Color Customization
 st.markdown("""
     <style>
         .main-container {
@@ -20,19 +20,20 @@ st.markdown("""
             border-radius: 16px;
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
         }
+        /* Customizing Process & Generate Button Color (Bright Emerald Green with dark text for high contrast) */
         .stButton>button {
             width: 100%;
-            background-color: #4f46e5;
-            color: white;
+            background-color: #10b981 !important;
+            color: #ffffff !important;
             font-size: 16px;
-            font-weight: 600;
-            padding: 12px;
+            font-weight: 700;
+            padding: 14px;
             border-radius: 8px;
             border: none;
             transition: background 0.3s ease;
         }
         .stButton>button:hover {
-            background-color: #4338ca;
+            background-color: #059669 !important;
         }
         h1 {
             color: #1e293b;
@@ -79,12 +80,12 @@ if st.button("🚀 Process & Generate Orders", type="primary"):
                 # Read input file
                 df_input = pd.read_excel(uploaded_input, header=None)
 
-                # 1. Find FG Row & Col
+                # 1. Find FG Row & Col (Fixed python startswith syntax)
                 fg_row, fg_col = -1, -1
                 for r in range(df_input.shape[0]):
                     for c in range(df_input.shape[1]):
                         val = str(df_input.iloc[r, c]).strip().upper()
-                        if val.startsWith("FG"):
+                        if val.startswith("FG"):
                             fg_row, fg_col = r, c
                             break
                     if fg_row != -1:
@@ -181,7 +182,7 @@ if st.button("🚀 Process & Generate Orders", type="primary"):
                     wb_out.save(output_buffer)
                     output_buffer.seek(0)
 
-                    # Unique file naming with Route, Date, and Exact Timestamp (Hours-Minutes-Seconds)
+                    # Unique file naming with Route, Date, and Exact Timestamp
                     timestamp = datetime.datetime.now().strftime("%H%M%S")
                     unique_filename = f"Generated_Sales_Order_Route_{route_num}_{today_date}_{timestamp}.xlsx"
 
