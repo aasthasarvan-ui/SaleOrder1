@@ -4,18 +4,77 @@ import openpyxl
 import datetime
 import io
 
-st.set_page_config(page_title="Sales Order Automation Tool", page_icon="📊", layout="centered")
+# Page Configuration & Styling
+st.set_page_config(
+    page_title="Sales Order Automation Hub", 
+    page_icon="🚀", 
+    layout="centered"
+)
 
-st.title("📊 Sales Order Automation Tool")
-st.write("Apni **Inbound Demand Excel File** aur **Output.xlsx (Template)** yahan upload karein:")
+# Custom CSS for Modern UI
+st.markdown("""
+    <style>
+        .main-container {
+            background: #ffffff;
+            padding: 30px;
+            border-radius: 16px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+        }
+        .stButton>button {
+            width: 100%;
+            background-color: #4f46e5;
+            color: white;
+            font-size: 16px;
+            font-weight: 600;
+            padding: 12px;
+            border-radius: 8px;
+            border: none;
+            transition: background 0.3s ease;
+        }
+        .stButton>button:hover {
+            background-color: #4338ca;
+        }
+        h1 {
+            color: #1e293b;
+            font-size: 28px;
+            font-weight: 700;
+        }
+        p {
+            color: #64748b;
+        }
+    </style>
+""", unsafe_allow_html=True)
 
-# File uploaders
-uploaded_input = st.file_uploader("1. Inbound Demand Excel File upload karein", type=["xlsx", "xls"])
-uploaded_template = st.file_uploader("2. Output.xlsx Template file upload karein", type=["xlsx", "xls"])
+# App Header
+st.title("📊 Sales Order Automation Hub")
+st.markdown("Upload your **Inbound Demand File** and **Output Template** below to generate formatted orders instantly.")
+st.markdown("---")
 
-if st.button("Process & Generate Orders", type="primary"):
+# File Upload Section
+col1, col2 = st.columns(2)
+
+with col1:
+    st.subheader("📥 Inbound File")
+    uploaded_input = st.file_uploader("Upload Demand Excel", type=["xlsx", "xls"], key="input")
+
+with col2:
+    st.subheader("📋 Template File")
+    uploaded_template = st.file_uploader("Upload Output.xlsx", type=["xlsx", "xls"], key="template")
+
+st.markdown("<br>", unsafe_allow_html=True)
+
+# Session state initialization
+if "processed_data" not in st.session_state:
+    st.session_state["processed_data"] = None
+if "filename" not in st.session_state:
+    st.session_state["filename"] = ""
+if "total_orders" not in st.session_state:
+    st.session_state["total_orders"] = 0
+
+# Process Button & Action Logic
+if st.button("🚀 Process & Generate Orders", type="primary"):
     if uploaded_input is not None and uploaded_template is not None:
-        with st.spinner("Processing ho rahi hai, kripya intezaar karein..."):
+        with st.spinner("⚡ Processing files and preserving theme... Please wait."):
             try:
                 # Read input file
                 df_input = pd.read_excel(uploaded_input, header=None)
@@ -25,7 +84,7 @@ if st.button("Process & Generate Orders", type="primary"):
                 for r in range(df_input.shape[0]):
                     for c in range(df_input.shape[1]):
                         val = str(df_input.iloc[r, c]).strip().upper()
-                        if val.startswith("FG"):
+                        if val.startsWith("FG"):
                             fg_row, fg_col = r, c
                             break
                     if fg_row != -1:
@@ -122,18 +181,29 @@ if st.button("Process & Generate Orders", type="primary"):
                     wb_out.save(output_buffer)
                     output_buffer.seek(0)
 
-                    output_filename = f"Generated_Sales_Order_{route_num}.xlsx"
-                    
-                    st.success(f"🎉 Success! Total {sales_order_num-1} orders generated successfully with 100% original theme.")
-                    
-                    # Download Button
-                    st.download_button(
-                        label="📥 Download Generated Sales Order Excel",
-                        data=output_buffer,
-                        file_name=output_filename,
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
+                    # Unique file naming with Route, Date, and Exact Timestamp (Hours-Minutes-Seconds)
+                    timestamp = datetime.datetime.now().strftime("%H%M%S")
+                    unique_filename = f"Generated_Sales_Order_Route_{route_num}_{today_date}_{timestamp}.xlsx"
+
+                    st.session_state["processed_data"] = output_buffer.getvalue()
+                    st.session_state["filename"] = unique_filename
+                    st.session_state["total_orders"] = sales_order_num - 1
             except Exception as e:
                 st.error(f"❌ Error aagaya: {e}")
     else:
-                    st.warning("⚠️ Kripya pehle dono files (Inbound Excel file aur Output.xlsx template) upload karein!")
+        st.warning("⚠️ Kripya pehle dono files upload karein!")
+
+# Automatically show download section if processing is done
+if st.session_state["processed_data"] is not None:
+    st.markdown("---")
+    st.success(f"🎉 Success! Total {st.session_state['total_orders']} orders generated with original theme preserved.")
+    
+    st.markdown(f"**Generated File Name:** `{st.session_state['filename']}`")
+    st.download_button(
+        label="🔥 DOWNLOAD GENERATED FILE NOW 🔥",
+        data=st.session_state["processed_data"],
+        file_name=st.session_state["filename"],
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        type="primary",
+        use_container_width=True
+    )
