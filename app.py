@@ -2,7 +2,9 @@ import streamlit as st
 import pandas as pd
 import openpyxl
 import datetime
+import os
 import io
+import glob
 
 # Page Configuration & Styling
 st.set_page_config(
@@ -11,16 +13,8 @@ st.set_page_config(
     layout="centered"
 )
 
-# Custom CSS for Modern UI & Button Color Customization
 st.markdown("""
     <style>
-        .main-container {
-            background: #ffffff;
-            padding: 30px;
-            border-radius: 16px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
-        }
-        /* Customizing Process & Generate Button Color (Bright Emerald Green with dark text for high contrast) */
         .stButton>button {
             width: 100%;
             background-color: #10b981 !important;
@@ -30,70 +24,60 @@ st.markdown("""
             padding: 14px;
             border-radius: 8px;
             border: none;
-            transition: background 0.3s ease;
         }
         .stButton>button:hover {
             background-color: #059669 !important;
         }
-        h1 {
-            color: #1e293b;
-            font-size: 28px;
-            font-weight: 700;
-        }
-        p {
-            color: #64748b;
-        }
     </style>
 """, unsafe_allow_html=True)
 
-# App Header
 st.title("📊 Sales Order Automation Hub")
-st.markdown("Upload your **Inbound Demand File** and **Output Template** below to generate formatted orders instantly.")
+st.markdown("Upload multiple **Inbound Demand Files** and an **Output Template** to process orders in batch.")
 st.markdown("---")
 
 # File Upload Section
-col1, col2 = st.columns(2)
-
-with col1:
-    st.subheader("📥 Inbound File")
-    uploaded_input = st.file_uploader("Upload Demand Excel", type=["xlsx", "xls"], key="input")
-
-with col2:
-    st.subheader("📋 Template File")
-    uploaded_template = st.file_uploader("Upload Output.xlsx", type=["xlsx", "xls"], key="template")
+uploaded_inputs = st.file_uploader("Upload Multiple Demand Excel Files", type=["xlsx", "xls"], accept_multiple_files=True, key="inputs")
+uploaded_template = st.file_uploader("Upload Output.xlsx Template", type=["xlsx", "xls"], key="template")
 
 st.markdown("<br>", unsafe_allow_html=True)
 
-# Session state initialization
-if "processed_data" not in st.session_state:
-    st.session_state["processed_data"] = None
-if "filename" not in st.session_state:
-    st.session_state["filename"] = ""
-if "total_orders" not in st.session_state:
-    st.session_state["total_orders"] = 0
-
-# Process Button & Action Logic
-if st.button("🚀 Process & Generate Orders", type="primary"):
-    if uploaded_input is not None and uploaded_template is not None:
-        with st.spinner("⚡ Processing files and preserving theme... Please wait."):
+if st.button("🚀 Process Batch Orders", type="primary"):
+    if uploaded_inputs and uploaded_template is not None:
+        with st.spinner("⚡ Processing files in batch and preserving original themes... Please wait."):
             try:
-                # Read input file
-                df_input = pd.read_excel(uploaded_input, header=None)
+                total_processed = 0
+                total_skipped = 0
+                total_orders_created = 0
+                
+                template_bytes = uploaded_template.getvalue()
+                today_date = datetime.date.today().strftime("%Y-%m-%d")
+                timestamp = datetime.datetime.now().strftime("%H%M%S")
 
-                # 1. Find FG Row & Col (Fixed python startswith syntax)
-                fg_row, fg_col = -1, -1
-                for r in range(df_input.shape[0]):
-                    for c in range(df_input.shape[1]):
-                        val = str(df_input.iloc[r, c]).strip().upper()
-                        if val.startswith("FG"):
-                            fg_row, fg_col = r, c
+                summary_logs = []
+
+                for uploaded_file in uploaded_inputs:
+                    short_filename = uploaded_file.name
+                    if short_filename.lower() == "output.xlsx":
+                        continue
+
+                    # Read input file via pandas
+                    file_bytes = uploaded_file.getvalue()
+                    df_input = pd.read_excel(io.BytesIO(file_bytes), header=None)
+
+                    # 1. Find FG Row & Col
+                    fg_row, fg_col = -1, -1
+                    for r in range(df_input.shape[0]):
+                        for c in range(df_input.shape[1]):
+                            val = str(df_input.iloc[r, c]).strip().upper()
+                            if val.startswith("FG"):
+                                fg_row, fg_col = r, c
+                                break
+                        if fg_row != -1:
                             break
-                    if fg_row != -1:
-                        break
 
-                if fg_row == -1:
-                    st.error("❌ Error: Input file mein 'FG' material code row nahi mila!")
-                else:
+                    if fg_row == -1:
+                        continue
+
                     # 2. Route Number Finding
                     route_num = "22"
                     for r in range(min(fg_row, 5)):
@@ -104,15 +88,39 @@ if st.button("🚀 Process & Generate Orders", type="primary"):
                                 route_num = cell_val
                                 break
 
-                    # 3. Agency Column Detection
-                    agency_col = -1
-                    for c in range(fg_col):
-                        header_text = str(df_input.iloc[fg_row - 1, c] if fg_row > 0 else "").upper().replace(" ", "")
-                        if "AG" in header_text and "SALES" not in header_text:
-                            agency_col = c
+                    safe_route_num = "".join(c if c.isalnum() or c in ('-', '_') else "-" for c in str(route_num))
+
+                    # 3. Advanced Agency Detection
+                    agency_col = 0
+                    for cSearch in range(fg_col):
+                        head_cell = str(df_input.iloc[fg_row - 1, cSearch] if fg_row > 0 else "")
+                        head_clean = head_cell.upper().replace("\n", "").replace(" ", "")
+                        if "AG" in head_clean and "SALES" not in head_clean:
+                            agency_col = cSearch
                             break
-                    if agency_col == -1:
-                        agency_col = 2
+
+                    if agency_col == 0:
+                        for col in range(fg_col):
+                            header_text = str(df_input.iloc[fg_row - 1, col] if fg_row > 0 else "") + " " + str(df_input.iloc[fg_row, col])
+                            header_text = header_text.upper()
+                            if any(x in header_text for x in ["SR", "SERIAL", "S.NO", "NO"]):
+                                continue
+                            
+                            is_numeric = True
+                            count_num = 0
+                            for i in range(fg_row + 1, df_input.shape[0]):
+                                v = df_input.iloc[i, col]
+                                if pd.notna(v) and str(v).strip() != "":
+                                    if not str(v).replace('.0','').isdigit():
+                                        is_numeric = False
+                                        break
+                                    count_num += 1
+                            if is_numeric and count_num > 0:
+                                agency_col = col
+                                break
+
+                    if agency_col == 0:
+                        agency_col = 2  # default fallback
 
                     # 4. Strict Valid FG Columns (Excluding Total & Remarks)
                     valid_cols = []
@@ -120,18 +128,16 @@ if st.button("🚀 Process & Generate Orders", type="primary"):
                         fg_code = str(df_input.iloc[fg_row, c] if fg_row >= 0 else "").strip()
                         header_name = str(df_input.iloc[fg_row - 1, c] if fg_row > 0 else "").strip().upper()
                         
-                        if "TOTAL" in header_name or "REMARK" in header_name or not fg_code.upper().startswith("FG"):
+                        if "TOTAL" in header_name or "REMARK" in header_name or "SUM" in header_name or not fg_code.upper().startswith("FG"):
                             break
-                        valid_cols.append(c)
+                        valid_cols.append((c, fg_code))
 
                     # 5. Load Template Workbook via openpyxl (Keeps theme/formatting 100% untouched)
-                    template_bytes = uploaded_template.getvalue()
                     wb_out = openpyxl.load_workbook(io.BytesIO(template_bytes))
                     ws_out = wb_out["Order Data"] if "Order Data" in wb_out.sheetnames else wb_out.active
 
                     current_row = 6
                     sales_order_num = 1
-                    today_date = datetime.date.today().strftime("%Y-%m-%d")
 
                     # 6. Data Mapping and Injection
                     for r in range(fg_row + 1, df_input.shape[0]):
@@ -141,16 +147,13 @@ if st.button("🚀 Process & Generate Orders", type="primary"):
                             item_id = 10
                             row_has_items = False
                             
-                            for c in valid_cols:
-                                fg_code = str(df_input.iloc[fg_row, c]).strip()
+                            for c, fg_code in valid_cols:
                                 sku_qty = df_input.iloc[r, c]
-                                
                                 if pd.notna(sku_qty) and str(sku_qty).strip() != "":
                                     try:
                                         qty_val = float(sku_qty)
                                         if qty_val > 0:
                                             row_has_items = True
-                                            fg_name = fg_code
                                             
                                             ws_out.cell(row=current_row, column=2, value=sales_order_num)
                                             ws_out.cell(row=current_row, column=3, value="OR")
@@ -163,7 +166,7 @@ if st.button("🚀 Process & Generate Orders", type="primary"):
                                             ws_out.cell(row=current_row, column=10, value=today_date)
                                             ws_out.cell(row=current_row, column=11, value=today_date)
                                             ws_out.cell(row=current_row, column=15, value=item_id)
-                                            ws_out.cell(row=current_row, column=16, value=fg_name)
+                                            ws_out.cell(row=current_row, column=16, value=fg_code)
                                             ws_out.cell(row=current_row, column=19, value=qty_val)
                                             ws_out.cell(row=current_row, column=20, value="Bag")
                                             ws_out.cell(row=current_row, column=22, value=2100)
@@ -176,35 +179,31 @@ if st.button("🚀 Process & Generate Orders", type="primary"):
                                         pass
                             if row_has_items:
                                 sales_order_num += 1
+                                total_orders_created += 1
 
-                    # Save output to memory buffer
+                    # Save output file to memory buffer
                     output_buffer = io.BytesIO()
                     wb_out.save(output_buffer)
                     output_buffer.seek(0)
 
-                    # Unique file naming with Route, Date, and Exact Timestamp
-                    timestamp = datetime.datetime.now().strftime("%H%M%S")
-                    unique_filename = f"Generated_Sales_Order_Route_{route_num}_{today_date}_{timestamp}.xlsx"
+                    out_filename = f"{safe_routeNum}_{today_date}_{timestamp}.xlsx"
+                    
+                    st.success(f"✅ Processed: {shortfilename} -> Orders created: {sales_order_num-1}")
+                    
+                    # Individual download buttons for each processed file
+                    st.download_button(
+                        label=f"📥 Download Output for {shortfilename}",
+                        data=output_buffer,
+                        file_name=out_filename,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key=out_filename
+                    )
+                    total_processed += 1
 
-                    st.session_state["processed_data"] = output_buffer.getvalue()
-                    st.session_state["filename"] = unique_filename
-                    st.session_state["total_orders"] = sales_order_num - 1
+                st.markdown("---")
+                st.info(f"📊 **Batch Summary:** Total Files Processed: {total_processed} | Total Orders Generated: {total_orders_created}")
+
             except Exception as e:
                 st.error(f"❌ Error aagaya: {e}")
     else:
-        st.warning("⚠️ Kripya pehle dono files upload karein!")
-
-# Automatically show download section if processing is done
-if st.session_state["processed_data"] is not None:
-    st.markdown("---")
-    st.success(f"🎉 Success! Total {st.session_state['total_orders']} orders generated with original theme preserved.")
-    
-    st.markdown(f"**Generated File Name:** `{st.session_state['filename']}`")
-    st.download_button(
-        label="🔥 DOWNLOAD GENERATED FILE NOW 🔥",
-        data=st.session_state["processed_data"],
-        file_name=st.session_state["filename"],
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        type="primary",
-        use_container_width=True
-    )
+        st.warning("⚠️ Kripya pehle multiple demand files aur template file upload karein!")
