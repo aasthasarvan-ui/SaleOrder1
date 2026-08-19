@@ -106,28 +106,25 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                             total_col = cSearch
                             break
 
-                    # 3. Updated Safe Route Number Finding (Max 4 chars, number/text mix, excluding product codes)
+                    # 3. Updated Safe Route Number Finding (Strict: 1-4 chars, numeric mix, ignoring RT/DR labels & product codes)
                     route_num = "22"
+                    ignore_list = ["RT", "DR", "RT DR", "SALES PERSON", "CONTACT NO:", "MATERIAL CODE"]
+                    
                     for r in range(min(fg_row, 5)):
                         for c in range(min(total_col, 30)):
                             cell_val = str(df_input.iloc[r, c]).strip()
                             upper_val = cell_val.upper()
                             
-                            # Check if header explicitly says Route
-                            if "ROUTE" in upper_val or upper_val == "RT":
-                                try:
-                                    next_val = str(df_input.iloc[r + 1, c]).strip()
-                                    if next_val != "":
-                                        route_num = next_val
-                                        break
-                                except:
-                                    pass
-                            
-                            # Route logic: Max 4 chars, numeric or mix, excluding product codes (PC, MS, GM, DP etc.)
+                            # Skip if cell matches ignore labels
+                            if upper_val in ignore_list:
+                                continue
+                                
+                            # Logic: 1 to 4 characters, must contain at least one digit
                             if cell_val != "" and 1 <= len(cell_val) <= 4 and any(char.isdigit() for char in cell_val):
+                                # Exclude Product Codes (PC, MS, GM, DP, M, SKU, FG)
                                 if not (upper_val.startswith("PC") or upper_val.startswith("MS") or upper_val.startswith("M") or 
                                         upper_val.startswith("GM") or upper_val.startswith("DP") or upper_val.startswith("SKU") or 
-                                        upper_val.startswith("FG") or upper_val in ["SALES PERSON", "CONTACT NO:", "RT DR", "MATERIAL CODE"]):
+                                        upper_val.startswith("FG")):
                                     route_num = cell_val
                                     break
                         if route_num != "22":
