@@ -106,7 +106,7 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                             total_col = cSearch
                             break
 
-                    # 3. Safe Route Number Finding (Product names like PC60, MS18, M10, GM, DP ko avoid karte hue)
+                    # 3. Smart Route Number Finding (Number or Number+Text mix, Max 4 characters, avoiding product codes)
                     route_num = "22"
                     for r in range(min(fg_row, 5)):
                         for c in range(min(total_col, 30)):
@@ -117,14 +117,14 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                             if "ROUTE" in upper_val or upper_val == "RT":
                                 try:
                                     next_val = str(df_input.iloc[r + 1, c]).strip()
-                                    if next_val != "":
+                                    if next_val != "" and len(next_val) <= 4:
                                         route_num = next_val
                                         break
                                 except:
                                     pass
                             
-                            # General pattern search avoiding product codes (MS, PC, M, GM, DP, SKU, FG etc.)
-                            if cell_val != "" and len(cell_val) <= 6 and any(char.isdigit() for char in cell_val):
+                            # Pattern check: Max 4 characters, contains digit, avoids product names (PC, MS, M, GM, DP, SKU, FG etc.)
+                            if cell_val != "" and 1 <= len(cell_val) <= 4 and any(char.isdigit() for char in cell_val):
                                 if not (upper_val.startswith("PC") or upper_val.startswith("MS") or upper_val.startswith("M") or 
                                         upper_val.startswith("GM") or upper_val.startswith("DP") or upper_val.startswith("SKU") or 
                                         upper_val.startswith("FG") or upper_val in ["SALES PERSON", "CONTACT NO:", "RT DR", "MATERIAL CODE"]):
@@ -135,20 +135,28 @@ if st.button("🚀 Process Batch Orders", type="primary"):
 
                     safe_route_num = "".join(c if c.isalnum() or c in ('-', '_') else "-" for c in str(route_num))
 
-                    # 4. Smart Agency Detection (1 to 5 chars length check)
+                    # 4. Smart Agency Detection (Priority Header Check + 1 to 5 chars length check)
                     agency_col = -1
+                    # Priority 1: Header mein AG ya AGENCY NO dhoondhna
                     for cSearch in range(fg_col - 1, -1, -1):
-                        valid_agency_count = 0
-                        for rCheck in range(fg_row + 1, df_input.shape[0]):
-                            v = df_input.iloc[rCheck, cSearch]
-                            if pd.notna(v) and str(v).strip() != "":
-                                clean_v = str(v).replace('.0', '').strip()
-                                if clean_v.isdigit() and 1 <= len(clean_v) <= 5:
-                                    valid_agency_count += 1
-                        
-                        if valid_agency_count > 0:
+                        h = str(df_input.iloc[fg_row - 1, cSearch] if fg_row > 0 else "").upper()
+                        if any(x in h for x in ["AG", "AGENCY NO", "AGENCY"]):
                             agency_col = cSearch
                             break
+                    
+                    # Priority 2: Fallback (1 to 5 digit numeric agency check, ignoring mobile numbers)
+                    if agency_col == -1:
+                        for cSearch in range(fg_col - 1, -1, -1):
+                            valid_agency_count = 0
+                            for rCheck in range(fg_row + 1, df_input.shape[0]):
+                                v = df_input.iloc[rCheck, cSearch]
+                                if pd.notna(v) and str(v).strip() != "":
+                                    clean_v = str(v).replace('.0', '').strip()
+                                    if clean_v.isdigit() and 1 <= len(clean_v) <= 5:
+                                        valid_agency_count += 1
+                            if valid_agency_count > 0:
+                                agency_col = cSearch
+                                break
 
                     if agency_col == -1 and fg_col > 0:
                         agency_col = fg_col - 1
