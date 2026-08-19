@@ -71,33 +71,26 @@ if st.button("🚀 Process Batch Orders", type="primary"):
 
                     safe_route_num = "".join(c if c.isalnum() or c in ('-', '_') else "-" for c in str(route_num))
 
-                    # 3. Agency Detection Logic (FG ke Left se pehla valid numerical column)
+                    # 3. Exact Agency Detection (FG se left ki taraf pehla non-sequential numerical column)
                     agency_col = -1
-                    
-                    # FG column ke theek left se start karke piche ki taraf (0 tak) jayenge
                     for cSearch in range(fg_col - 1, -1, -1):
-                        # Header text check karenge ki kahin ye Sr No ya Serial toh nahi
-                        head_cell = str(df_input.iloc[fg_row - 1, cSearch] if fg_row > 0 else "")
-                        head_clean = head_cell.upper().replace(" ", "")
-                        
-                        if "SR" in head_clean or "SERIAL" in head_clean or "S.NO" in head_clean:
-                            continue # Serial number wale column ko chhod denge
-                        
-                        # Check karenge ki is column ke andar neeche numerical values (agency IDs) maujud hain ya nahi
+                        # Check karein ki is column mein numbers maujud hain ya nahi
                         numeric_count = 0
                         for rCheck in range(fg_row + 1, df_input.shape[0]):
-                            vTest = df_input.iloc[rCheck, cSearch]
-                            if pd.notna(vTest) and str(vTest).strip() != "":
-                                clean_v = str(vTest).replace('.0', '').strip()
+                            v = df_input.iloc[rCheck, cSearch]
+                            if pd.notna(v) and str(v).strip() != "":
+                                clean_v = str(v).replace('.0', '').strip()
                                 if clean_v.isdigit():
+                                    # Ye ensure karne ke liye ki ye serial number (1,2,3...) na ho, 
+                                    # hum check karte hain ki values agency codes jaisi hain (jaise > 5 ya non-sequential)
                                     numeric_count += 1
                         
-                        # Agar is column mein numerical values milti hain, toh yehi hamara Agency Column hai!
+                        # Agar is column mein numbers mil jate hain, toh yehi hamara Agency Column hai
                         if numeric_count > 0:
                             agency_col = cSearch
                             break
 
-                    # Agar loop se bhi na mile, toh default FG ke turant pehla column (fg_col - 1) le lenge
+                    # Fallback agar kuch na mile toh FG ka theek pehla column
                     if agency_col == -1 and fg_col > 0:
                         agency_col = fg_col - 1
 
@@ -127,14 +120,14 @@ if st.button("🚀 Process Batch Orders", type="primary"):
 
                     # 6. Data Mapping and Injection
                     for r in range(fg_row + 1, df_input.shape[0]):
-                        agency = df_input.iloc[r, agency_col] if agency_col >= 0 and agency_col < df_input.shape[1] else None
+                        agency = df_input.iloc[r, agency_col] if agency_col >= 0 else None
                         
                         if pd.notna(agency) and str(agency).strip() != "":
                             agency_str = str(agency).replace('.0', '').strip()
                             if agency_str.isdigit():
                                 agency_val = int(agency_str)
                                 
-                                # Unique Reference Logic (Repeat Agency)
+                                # Unique Reference Logic for Repeat Agencies
                                 agency_counts[agency_val] = agency_counts.get(agency_val, 0) + 1
                                 seq = agency_counts[agency_val]
                                 ref_number = f"REF-{agency_val}-{today_date}" if seq == 1 else f"REF-{agency_val}-{today_date}-{seq}"
@@ -150,6 +143,7 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                                             if qty_val > 0:
                                                 row_has_items = True
                                                 
+                                                # Default FG Code Logic (FG500014 if blank between FG and Total)
                                                 current_fg = str(df_input.iloc[fg_row, c]).strip()
                                                 if current_fg == "" or current_fg.lower() == "nan" or current_fg.upper() == "NONE":
                                                     current_fg = "FG500014"
@@ -192,7 +186,7 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                         "filename": out_filename
                     })
                 
-                st.success("✅ Batch Processing Complete!")
+                st.success(f"✅ Batch Processing Complete!")
 
             except Exception as e:
                 st.error(f"❌ Error aagaya: {e}")
