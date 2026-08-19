@@ -34,7 +34,7 @@ st.title("📊 Sales Order Automation Hub")
 st.markdown("Upload multiple **Inbound Demand Files** to process orders in batch (Template is loaded from GitHub automatically).")
 st.markdown("---")
 
-# File Upload Section (Sirf Input Files)
+# File Upload Section (Sirf Input Files - Template Hata Diya Gaya Hai)
 uploaded_inputs = st.file_uploader("Upload Multiple Demand Excel Files", type=["xlsx", "xls"], accept_multiple_files=True, key="inputs")
 
 st.markdown("<br>", unsafe_allow_html=True)
@@ -43,7 +43,7 @@ if st.button("🚀 Process Batch Orders", type="primary"):
     if uploaded_inputs:
         with st.spinner("⚡ Fetching template from GitHub and processing files... Please wait."):
             try:
-                # GitHub se Output.xlsx ka RAW link update kar diya gaya hai
+                # GitHub se Output.xlsx ka RAW link
                 github_template_url = "https://raw.githubusercontent.com/aasthasarvan-ui/SaleOrder1/main/Output.xlsx"
                 
                 # Request bhej kar template download kar rahe hain
