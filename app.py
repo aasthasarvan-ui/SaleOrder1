@@ -2,9 +2,8 @@ import streamlit as st
 import pandas as pd
 import openpyxl
 import datetime
-import os
 import io
-import glob
+import requests
 
 # Page Configuration & Styling
 st.set_page_config(
@@ -32,28 +31,34 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("📊 Sales Order Automation Hub")
-st.markdown("Upload multiple **Inbound Demand Files** and an **Output Template** to process orders in batch.")
+st.markdown("Upload multiple **Inbound Demand Files** to process orders in batch (Template is loaded from GitHub automatically).")
 st.markdown("---")
 
-# File Upload Section
+# File Upload Section (Sirf Input Files)
 uploaded_inputs = st.file_uploader("Upload Multiple Demand Excel Files", type=["xlsx", "xls"], accept_multiple_files=True, key="inputs")
-uploaded_template = st.file_uploader("Upload Output.xlsx Template", type=["xlsx", "xls"], key="template")
 
 st.markdown("<br>", unsafe_allow_html=True)
 
 if st.button("🚀 Process Batch Orders", type="primary"):
-    if uploaded_inputs and uploaded_template is not None:
-        with st.spinner("⚡ Processing files in batch and preserving original themes... Please wait."):
+    if uploaded_inputs:
+        with st.spinner("⚡ Fetching template from GitHub and processing files... Please wait."):
             try:
+                # GitHub se Output.xlsx ka RAW link update kar diya gaya hai
+                github_template_url = "https://raw.githubusercontent.com/aasthasarvan-ui/SaleOrder1/main/Output.xlsx"
+                
+                # Request bhej kar template download kar rahe hain
+                response = requests.get(github_template_url)
+                if response.status_code == 200:
+                    template_bytes = response.content
+                else:
+                    st.error("❌ GitHub se template file download nahi ho payi. Kripya URL check karein.")
+                    st.stop()
+                
                 total_processed = 0
-                total_skipped = 0
                 total_orders_created = 0
                 
-                template_bytes = uploaded_template.getvalue()
                 today_date = datetime.date.today().strftime("%Y-%m-%d")
                 timestamp = datetime.datetime.now().strftime("%H%M%S")
-
-                summary_logs = []
 
                 for uploaded_file in uploaded_inputs:
                     short_filename = uploaded_file.name
@@ -132,18 +137,33 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                             break
                         valid_cols.append((c, fg_code))
 
-                    # 5. Load Template Workbook via openpyxl (Keeps theme/formatting 100% untouched)
+                    # 5. Load Template Workbook via openpyxl
                     wb_out = openpyxl.load_workbook(io.BytesIO(template_bytes))
                     ws_out = wb_out["Order Data"] if "Order Data" in wb_out.sheetnames else wb_out.active
 
                     current_row = 6
                     sales_order_num = 1
 
-                    # 6. Data Mapping and Injection
+                    # 6. Data Mapping and Injection (with Unique Reference Logic)
+                    agency_counts = {}
+
                     for r in range(fg_row + 1, df_input.shape[0]):
                         agency = df_input.iloc[r, agency_col]
                         if pd.notna(agency) and str(agency).strip() != "" and str(agency).replace('.0','').isdigit():
                             agency_val = int(float(agency))
+                            
+                            if agency_val in agency_counts:
+                                agency_counts[agency_val] += 1
+                            else:
+                                agency_counts[agency_val] = 1
+                            
+                            current_agency_seq = agency_counts[agency_val]
+                            
+                            if current_agency_seq == 1:
+                                ref_number = f"REF-{agency_val}-{today_date}"
+                            else:
+                                ref_number = f"REF-{agency_val}-{today_date}-{current_agency_seq}"
+
                             item_id = 10
                             row_has_items = False
                             
@@ -162,7 +182,7 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                                             ws_out.cell(row=current_row, column=6, value=20)
                                             ws_out.cell(row=current_row, column=7, value=f"DR{agency_val}")
                                             ws_out.cell(row=current_row, column=8, value=f"DR{agency_val}")
-                                            ws_out.cell(row=current_row, column=9, value=f"REF-{agency_val}-{today_date}")
+                                            ws_out.cell(row=current_row, column=9, value=ref_number)
                                             ws_out.cell(row=current_row, column=10, value=today_date)
                                             ws_out.cell(row=current_row, column=11, value=today_date)
                                             ws_out.cell(row=current_row, column=15, value=item_id)
@@ -186,13 +206,12 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                     wb_out.save(output_buffer)
                     output_buffer.seek(0)
 
-                    out_filename = f"{safe_routeNum}_{today_date}_{timestamp}.xlsx"
+                    out_filename = f"{safe_route_num}_{today_date}_{timestamp}.xlsx"
                     
-                    st.success(f"✅ Processed: {shortfilename} -> Orders created: {sales_order_num-1}")
+                    st.success(f"✅ Processed: {short_filename} -> Orders created: {sales_order_num-1}")
                     
-                    # Individual download buttons for each processed file
                     st.download_button(
-                        label=f"📥 Download Output for {shortfilename}",
+                        label=f"📥 Download Output for {short_filename}",
                         data=output_buffer,
                         file_name=out_filename,
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -206,4 +225,4 @@ if st.button("🚀 Process Batch Orders", type="primary"):
             except Exception as e:
                 st.error(f"❌ Error aagaya: {e}")
     else:
-        st.warning("⚠️ Kripya pehle multiple demand files aur template file upload karein!")
+        st.warning("⚠️ Kripya pehle demand files upload karein!")
