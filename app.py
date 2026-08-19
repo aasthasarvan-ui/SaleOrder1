@@ -1,43 +1,3 @@
-import streamlit as st
-import pandas as pd
-import openpyxl
-import datetime
-import io
-import requests
-
-# Page Configuration & Styling
-st.set_page_config(
-    page_title="Sales Order Automation Hub", 
-    page_icon="🚀", 
-    layout="centered"
-)
-
-st.markdown("""
-    <style>
-        .stButton>button {
-            width: 100%;
-            background-color: #10b981 !important;
-            color: #ffffff !important;
-            font-size: 16px;
-            font-weight: 700;
-            padding: 14px;
-            border-radius: 8px;
-            border: none;
-        }
-        .stButton>button:hover {
-            background-color: #059669 !important;
-        }
-    </style>
-""", unsafe_allow_html=True)
-
-st.title("📊 Sales Order Automation Hub")
-st.markdown("Upload multiple **Inbound Demand Files** to process orders in batch (Template is loaded from GitHub automatically).")
-st.markdown("---")
-
-# Session State for persistent download buttons
-if 'processed_files' not in st.session_state:
-    st.session_state.processed_files = []
-
 # File Upload Section
 uploaded_inputs = st.file_uploader("Upload Multiple Demand Excel Files", type=["xlsx", "xls"], accept_multiple_files=True, key="inputs")
 
@@ -99,7 +59,7 @@ if st.button("🚀 Process Batch Orders", type="primary"):
 
                     safe_route_num = "".join(c if c.isalnum() or c in ('-', '_') else "-" for c in str(route_num))
 
-                    # 3. Smart Agency Detection (1 to 5 characters length check, ignoring mobile numbers)
+                    # 3. Smart Agency Detection (1 to 5 chars length check)
                     agency_col = -1
                     for cSearch in range(fg_col - 1, -1, -1):
                         valid_agency_count = 0
@@ -107,37 +67,49 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                             v = df_input.iloc[rCheck, cSearch]
                             if pd.notna(v) and str(v).strip() != "":
                                 clean_v = str(v).replace('.0', '').strip()
-                                # Agency number must be numeric and between 1 to 5 characters long
                                 if clean_v.isdigit() and 1 <= len(clean_v) <= 5:
                                     valid_agency_count += 1
                         
-                        # Agar is column mein 1-5 digit wale valid agency numbers mil jate hain
                         if valid_agency_count > 0:
                             agency_col = cSearch
                             break
 
-                    # Fallback agar column na mile toh FG se theek pehla column
                     if agency_col == -1 and fg_col > 0:
                         agency_col = fg_col - 1
 
-                    # 4. Strict Valid FG Columns (Excluding Total & Remarks)
-                    valid_cols = []
-                    for c in range(fg_col, df_input.shape[1]):
-                        fg_code = str(df_input.iloc[fg_row, c] if fg_row >= 0 else "").strip()
-                        header_name = str(df_input.iloc[fg_row - 1, c] if fg_row > 0 else "").strip().upper()
+                    # 4. Total/Sum Column Detection
+                    total_col = df_input.shape[1]
+                    for cSearch in range(fg_col, df_input.shape[1]):
+                        h_val = str(df_input.iloc[fg_row, cSearch] if fg_row >= 0 else "").strip().upper()
+                        h_prev = str(df_input.iloc[fg_row - 1, cSearch] if fg_row > 0 else "").strip().upper()
                         
-                        if "TOTAL" in header_name or "REMARK" in header_name or "SUM" in header_name or not fg_code.upper().startswith("FG"):
+                        is_total = "TOTAL" in h_val or "SUM" in h_val or "TOTAL" in h_prev or "SUM" in h_prev
+                        if not is_total:
+                            try:
+                                cell_formula = str(df_input.iloc[fg_row + 1, cSearch]).upper()
+                                if "SUM" in cell_formula:
+                                    is_total = True
+                            except:
+                                pass
+                        
+                        if is_total:
+                            total_col = cSearch
                             break
+
+                    # 5. Valid FG Columns Mapping between FG start and Total column
+                    valid_cols = []
+                    for c in range(fg_col, total_col):
+                        fg_code = str(df_input.iloc[fg_row, c] if fg_row >= 0 else "").strip()
                         valid_cols.append((c, fg_code))
 
-                    # 5. Load Template Workbook via openpyxl
+                    # 6. Load Template Workbook via openpyxl
                     wb_out = openpyxl.load_workbook(io.BytesIO(template_bytes))
                     ws_out = wb_out["Order Data"] if "Order Data" in wb_out.sheetnames else wb_out.active
 
                     current_row = 6
                     sales_order_num = 1
 
-                    # 6. Data Mapping and Injection (with Unique Reference & 1-5 char Agency validation)
+                    # 7. Data Mapping and Injection
                     agency_counts = {}
                     file_orders_count = 0
 
@@ -147,7 +119,6 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                         if pd.notna(agency) and str(agency).strip() != "":
                             agency_str = str(agency).replace('.0','').strip()
                             
-                            # Strict Check: Agency number must be 1 to 5 digits only (ignores mobile numbers/long IDs)
                             if agency_str.isdigit() and 1 <= len(agency_str) <= 5:
                                 agency_val = int(agency_str)
                                 
@@ -170,9 +141,13 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                                     sku_qty = df_input.iloc[r, c]
                                     if pd.notna(sku_qty) and str(sku_qty).strip() != "":
                                         try:
-                                            qty_val = float(sku_qty)
+                                            qty_val =float(sku_qty)
                                             if qty_val > 0:
                                                 row_has_items = True
+                                                
+                                                current_fg = fg_code
+                                                if current_fg == "" or current_fg.lower() == "nan" or not current_fg.upper().startswith("FG"):
+                                                    current_fg = "FG500014"
                                                 
                                                 ws_out.cell(row=current_row, column=2, value=sales_order_num)
                                                 ws_out.cell(row=current_row, column=3, value="OR")
@@ -185,7 +160,7 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                                                 ws_out.cell(row=current_row, column=10, value=today_date)
                                                 ws_out.cell(row=current_row, column=11, value=today_date)
                                                 ws_out.cell(row=current_row, column=15, value=item_id)
-                                                ws_out.cell(row=current_row, column=16, value=fg_code)
+                                                ws_out.cell(row=current_row, column=16, value=current_fg)
                                                 ws_out.cell(row=current_row, column=19, value=qty_val)
                                                 ws_out.cell(row=current_row, column=20, value="Bag")
                                                 ws_out.cell(row=current_row, column=22, value=2100)
@@ -206,7 +181,7 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                     wb_out.save(output_buffer)
                     output_buffer.seek(0)
 
-                    out_filename = f"{safe_route_num}_{today_date}_{timestamp}.xlsx"
+                    out_filename = safe_route_num + "_" + today_date + "_" + timestamp + ".xlsx"
                     
                     st.session_state.processed_files.append({
                         "name": short_filename,
@@ -219,15 +194,18 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                 st.success("✅ Batch Processing Complete!")
 
             except Exception as e:
-                st.error(f"❌ Error aagaya: {e}")
+                st.error("❌ Error aagaya: " + str(e))
+    else:
+        # Yahin par warning aayegi jab file upload kiye bina button dabaya jayega
+        st.warning("⚠️ Kripya pehle demand files upload karein!")
 
 # Display persistent download buttons and summary from Session State
 if st.session_state.processed_files:
     st.markdown("---")
     for item in st.session_state.processed_files:
-        st.success(f"✅ Processed: {item['name']} -> Orders created: {item['orders']}")
+        st.success("✅ Processed: " + item['name'] + " -> Orders created: " + str(item['orders']))
         st.download_button(
-            label=f"📥 Download Output for {item['name']}",
+            label="📥 Download Output for " + item['name'],
             data=item['data'],
             file_name=item['filename'],
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -237,6 +215,4 @@ if st.session_state.processed_files:
     st.markdown("---")
     total_files_count = len(st.session_state.processed_files)
     total_gen_orders = sum(item['orders'] for item in st.session_state.processed_files)
-    st.info(f"📊 **Batch Summary:** Total Files Processed: {total_files_count} | Total Orders Generated: {total_gen_orders}")
-else:
-    st.warning("⚠️ Kripya pehle demand files upload karein!")
+    st.info("📊 **Batch Summary:** Total Files Processed: " + str(total_files_count) + " | Total Orders Generated: " + str(total_gen_orders))
