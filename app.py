@@ -106,25 +106,27 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                             total_col = cSearch
                             break
 
-                    # 3. Updated Safe Route Number Finding (Strict: 1-4 chars, numeric mix, ignoring RT/DR labels & product codes)
+                    # 3. Final Corrected Route Number Finding Logic (Aapke bataye examples ke mutabiq)
                     route_num = "22"
-                    ignore_list = ["RT", "DR", "RT DR", "SALES PERSON", "CONTACT NO:", "MATERIAL CODE"]
+                    ignore_list = ["RT", "DR", "RT DR", "ROUTE", "SALES PERSON", "CONTACT NO:", "MATERIAL CODE"]
                     
                     for r in range(min(fg_row, 5)):
                         for c in range(min(total_col, 30)):
                             cell_val = str(df_input.iloc[r, c]).strip()
                             upper_val = cell_val.upper()
                             
-                            # Skip if cell matches ignore labels
+                            # A. Ignore Labels
                             if upper_val in ignore_list:
                                 continue
                                 
-                            # Logic: 1 to 4 characters, must contain at least one digit
-                            if cell_val != "" and 1 <= len(cell_val) <= 4 and any(char.isdigit() for char in cell_val):
-                                # Exclude Product Codes (PC, MS, GM, DP, M, SKU, FG)
-                                if not (upper_val.startswith("PC") or upper_val.startswith("MS") or upper_val.startswith("M") or 
-                                        upper_val.startswith("GM") or upper_val.startswith("DP") or upper_val.startswith("SKU") or 
-                                        upper_val.startswith("FG")):
+                            # B. Ignore Product Codes (MS, PC, GM, DP, M, SKU, FG etc.)
+                            is_product_code = any(upper_val.startswith(p) for p in ["PC", "MS", "M", "GM", "DP", "SKU", "FG"])
+                            if is_product_code:
+                                continue
+                            
+                            # C. Route format: 1-5 chars (with space support like "A 13"), must contain at least one digit
+                            if cell_val != "" and 1 <= len(cell_val) <= 5:
+                                if any(char.isdigit() for char in cell_val):
                                     route_num = cell_val
                                     break
                         if route_num != "22":
