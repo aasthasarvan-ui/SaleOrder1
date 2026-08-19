@@ -87,37 +87,7 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                     if fg_row == -1:
                         continue
 
-                    # 2. Route Number Finding
-                    route_num = "22"
-                    for r in range(min(fg_row, 5)):
-                        for c in range(min(df_input.shape[1], 10)):
-                            cell_val = str(df_input.iloc[r, c]).strip()
-                            upper_val = cell_val.upper()
-                            if cell_val != "" and len(cell_val) <= 6 and any(char.isdigit() for char in cell_val) and upper_val not in ["SALES PERSON", "CONTACT NO:", "RT DR", "ROUTE", "MATERIAL CODE"]:
-                                route_num = cell_val
-                                break
-
-                    safe_route_num = "".join(c if c.isalnum() or c in ('-', '_') else "-" for c in str(route_num))
-
-                    # 3. Smart Agency Detection
-                    agency_col = -1
-                    for cSearch in range(fg_col - 1, -1, -1):
-                        valid_agency_count = 0
-                        for rCheck in range(fg_row + 1, df_input.shape[0]):
-                            v = df_input.iloc[rCheck, cSearch]
-                            if pd.notna(v) and str(v).strip() != "":
-                                clean_v = str(v).replace('.0', '').strip()
-                                if clean_v.isdigit() and 1 <= len(clean_v) <= 5:
-                                    valid_agency_count += 1
-                        
-                        if valid_agency_count > 0:
-                            agency_col = cSearch
-                            break
-
-                    if agency_col == -1 and fg_col > 0:
-                        agency_col = fg_col - 1
-
-                    # 4. Total Column Detection
+                    # 2. Total/Sum Column Detection (Taki Total ya Sum formula wale column ke baad data na jaye)
                     total_col = df_input.shape[1]
                     for cSearch in range(fg_col, df_input.shape[1]):
                         h_val = str(df_input.iloc[fg_row, cSearch] if fg_row >= 0 else "").strip().upper()
@@ -136,30 +106,90 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                             total_col = cSearch
                             break
 
-                    # 5. Valid FG Columns
+                    # 3. Safe Route Number Finding (Product names like PC60, MS18, M10, GM, DP ko avoid karte hue)
+                    route_num = "22"
+                    for r in range(min(fg_row, 5)):
+                        for c in range(min(total_col, 30)):
+                            cell_val = str(df_input.iloc[r, c]).strip()
+                            upper_val = cell_val.upper()
+                            
+                            # Check if header explicitly says Route
+                            if "ROUTE" in upper_val or upper_val == "RT":
+                                try:
+                                    next_val = str(df_input.iloc[r + 1, c]).strip()
+                                    if next_val != "":
+                                        route_num = next_val
+                                        break
+                                except:
+                                    pass
+                            
+                            # General pattern search avoiding product codes (MS, PC, M, GM, DP, SKU, FG etc.)
+                            if cell_val != "" and len(cell_val) <= 6 and any(char.isdigit() for char in cell_val):
+                                if not (upper_val.startswith("PC") or upper_val.startswith("MS") or upper_val.startswith("M") or 
+                                        upper_val.startswith("GM") or upper_val.startswith("DP") or upper_val.startswith("SKU") or 
+                                        upper_val.startswith("FG") or upper_val in ["SALES PERSON", "CONTACT NO:", "RT DR", "MATERIAL CODE"]):
+                                    route_num = cell_val
+                                    break
+                        if route_num != "22":
+                            break
+
+                    safe_route_num = "".join(c if c.isalnum() or c in ('-', '_') else "-" for c in str(route_num))
+
+                    # 4. Smart Agency Detection (1 to 5 chars length check)
+                    agency_col = -1
+                    for cSearch in range(fg_col - 1, -1, -1):
+                        valid_agency_count = 0
+                        for rCheck in range(fg_row + 1, df_input.shape[0]):
+                            v = df_input.iloc[rCheck, cSearch]
+                            if pd.notna(v) and str(v).strip() != "":
+                                clean_v = str(v).replace('.0', '').strip()
+                                if clean_v.isdigit() and 1 <= len(clean_v) <= 5:
+                                    valid_agency_count += 1
+                        
+                        if valid_agency_count > 0:
+                            agency_col = cSearch
+                            break
+
+                    if agency_col == -1 and fg_col > 0:
+                        agency_col = fg_col - 1
+
+                    # 5. Valid FG Columns Mapping between FG start and Total column
                     valid_cols = []
                     for c in range(fg_col, total_col):
                         fg_code = str(df_input.iloc[fg_row, c] if fg_row >= 0 else "").strip()
                         valid_cols.append((c, fg_code))
 
-                    # 6. Load Template
+                    # 6. Load Template Workbook via openpyxl
                     wb_out = openpyxl.load_workbook(io.BytesIO(template_bytes))
                     ws_out = wb_out["Order Data"] if "Order Data" in wb_out.sheetnames else wb_out.active
 
                     current_row = 6
                     sales_order_num = 1
+
+                    # 7. Data Mapping and Injection
                     agency_counts = {}
                     file_orders_count = 0
 
                     for r in range(fg_row + 1, df_input.shape[0]):
                         agency = df_input.iloc[r, agency_col] if agency_col >= 0 else None
+                        
                         if pd.notna(agency) and str(agency).strip() != "":
                             agency_str = str(agency).replace('.0','').strip()
+                            
                             if agency_str.isdigit() and 1 <= len(agency_str) <= 5:
                                 agency_val = int(agency_str)
-                                agency_counts[agency_val] = agency_counts.get(agency_val, 0) + 1
+                                
+                                if agency_val in agency_counts:
+                                    agency_counts[agency_val] += 1
+                                else:
+                                    agency_counts[agency_val] = 1
+                                
                                 current_agency_seq = agency_counts[agency_val]
-                                ref_number = f"REF-{agency_val}-{today_date}" if current_agency_seq == 1 else f"REF-{agency_val}-{today_date}-{current_agency_seq}"
+                                
+                                if current_agency_seq == 1:
+                                    ref_number = f"REF-{agency_val}-{today_date}"
+                                else:
+                                    ref_number = f"REF-{agency_val}-{today_date}-{current_agency_seq}"
 
                                 item_id = 10
                                 row_has_items = False
@@ -171,7 +201,10 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                                             qty_val = float(sku_qty)
                                             if qty_val > 0:
                                                 row_has_items = True
-                                                current_fg = fg_code if (fg_code != "" and fg_code.lower() != "nan" and fg_code.upper().startswith("FG")) else "FG500014"
+                                                
+                                                current_fg = fg_code
+                                                if current_fg == "" or current_fg.lower() == "nan" or not current_fg.upper().startswith("FG"):
+                                                    current_fg = "FG500014"
                                                 
                                                 ws_out.cell(row=current_row, column=2, value=sales_order_num)
                                                 ws_out.cell(row=current_row, column=3, value="OR")
@@ -200,14 +233,17 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                                     file_orders_count += 1
                                     total_orders_created += 1
 
+                    # Save output file to memory buffer
                     output_buffer = io.BytesIO()
                     wb_out.save(output_buffer)
                     output_buffer.seek(0)
+
+                    out_filename = safe_route_num + "_" + today_date + "_" + timestamp + ".xlsx"
                     
                     st.session_state.processed_files.append({
                         "name": short_filename,
                         "data": output_buffer.getvalue(),
-                        "filename": safe_route_num + "_" + today_date + "_" + timestamp + ".xlsx",
+                        "filename": out_filename,
                         "orders": file_orders_count
                     })
                     total_processed += 1
@@ -219,7 +255,7 @@ if st.button("🚀 Process Batch Orders", type="primary"):
     else:
         st.warning("⚠️ Kripya pehle demand files upload karein!")
 
-# Display download buttons and toast notification
+# Display persistent download buttons and summary from Session State
 if st.session_state.processed_files:
     st.markdown("---")
     for item in st.session_state.processed_files:
@@ -234,4 +270,6 @@ if st.session_state.processed_files:
             st.toast(f"🎉 '{item['filename']}' successfully download ho gaya hai!", icon="📥")
     
     st.markdown("---")
-    st.info("📊 **Batch Summary:** Total Files: " + str(len(st.session_state.processed_files)) + " | Total Orders: " + str(sum(item['orders'] for item in st.session_state.processed_files)))
+    total_files_count = len(st.session_state.processed_files)
+    total_gen_orders = sum(item['orders'] for item in st.session_state.processed_files)
+    st.info("📊 **Batch Summary:** Total Files Processed: " + str(total_files_count) + " | Total Orders Generated: " + str(total_gen_orders))
