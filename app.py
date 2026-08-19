@@ -41,7 +41,7 @@ st.markdown("""
             font-weight: 700;
         }
         p {
-            color: #ffffff;
+            color: #64748b;
         }
     </style>
 """, unsafe_allow_html=True)
