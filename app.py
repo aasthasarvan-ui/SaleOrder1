@@ -51,7 +51,6 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                 # GitHub se Output.xlsx ka RAW link
                 github_template_url = "https://raw.githubusercontent.com/aasthasarvan-ui/SaleOrder1/main/Output.xlsx"
                 
-                # Request bhej kar template download kar rahe hain
                 response = requests.get(github_template_url)
                 if response.status_code == 200:
                     template_bytes = response.content
@@ -100,22 +99,24 @@ if st.button("🚀 Process Batch Orders", type="primary"):
 
                     safe_route_num = "".join(c if c.isalnum() or c in ('-', '_') else "-" for c in str(route_num))
 
-                    # 3. Exact Agency Detection (FG ke left ki taraf pehla non-sequential numerical column)
+                    # 3. Smart Agency Detection (1 to 5 characters length check, ignoring mobile numbers)
                     agency_col = -1
                     for cSearch in range(fg_col - 1, -1, -1):
-                        numeric_count = 0
+                        valid_agency_count = 0
                         for rCheck in range(fg_row + 1, df_input.shape[0]):
                             v = df_input.iloc[rCheck, cSearch]
                             if pd.notna(v) and str(v).strip() != "":
                                 clean_v = str(v).replace('.0', '').strip()
-                                if clean_v.isdigit():
-                                    numeric_count += 1
+                                # Agency number must be numeric and between 1 to 5 characters long
+                                if clean_v.isdigit() and 1 <= len(clean_v) <= 5:
+                                    valid_agency_count += 1
                         
-                        if numeric_count > 0:
+                        # Agar is column mein 1-5 digit wale valid agency numbers mil jate hain
+                        if valid_agency_count > 0:
                             agency_col = cSearch
                             break
 
-                    # Fallback agar column na mile toh FG ka theek pehla column
+                    # Fallback agar column na mile toh FG se theek pehla column
                     if agency_col == -1 and fg_col > 0:
                         agency_col = fg_col - 1
 
@@ -136,64 +137,69 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                     current_row = 6
                     sales_order_num = 1
 
-                    # 6. Data Mapping and Injection (with Unique Reference Logic)
+                    # 6. Data Mapping and Injection (with Unique Reference & 1-5 char Agency validation)
                     agency_counts = {}
                     file_orders_count = 0
 
                     for r in range(fg_row + 1, df_input.shape[0]):
                         agency = df_input.iloc[r, agency_col] if agency_col >= 0 else None
-                        if pd.notna(agency) and str(agency).strip() != "" and str(agency).replace('.0','').isdigit():
-                            agency_val = int(float(str(agency).replace('.0','')))
+                        
+                        if pd.notna(agency) and str(agency).strip() != "":
+                            agency_str = str(agency).replace('.0','').strip()
                             
-                            if agency_val in agency_counts:
-                                agency_counts[agency_val] += 1
-                            else:
-                                agency_counts[agency_val] = 1
-                            
-                            current_agency_seq = agency_counts[agency_val]
-                            
-                            if current_agency_seq == 1:
-                                ref_number = f"REF-{agency_val}-{today_date}"
-                            else:
-                                ref_number = f"REF-{agency_val}-{today_date}-{current_agency_seq}"
+                            # Strict Check: Agency number must be 1 to 5 digits only (ignores mobile numbers/long IDs)
+                            if agency_str.isdigit() and 1 <= len(agency_str) <= 5:
+                                agency_val = int(agency_str)
+                                
+                                if agency_val in agency_counts:
+                                    agency_counts[agency_val] += 1
+                                else:
+                                    agency_counts[agency_val] = 1
+                                
+                                current_agency_seq = agency_counts[agency_val]
+                                
+                                if current_agency_seq == 1:
+                                    ref_number = f"REF-{agency_val}-{today_date}"
+                                else:
+                                    ref_number = f"REF-{agency_val}-{today_date}-{current_agency_seq}"
 
-                            item_id = 10
-                            row_has_items = False
-                            
-                            for c, fg_code in valid_cols:
-                                sku_qty = df_input.iloc[r, c]
-                                if pd.notna(sku_qty) and str(sku_qty).strip() != "":
-                                    try:
-                                        qty_val = float(sku_qty)
-                                        if qty_val > 0:
-                                            row_has_items = True
-                                            
-                                            ws_out.cell(row=current_row, column=2, value=sales_order_num)
-                                            ws_out.cell(row=current_row, column=3, value="OR")
-                                            ws_out.cell(row=current_row, column=4, value="SO20")
-                                            ws_out.cell(row=current_row, column=5, value=10)
-                                            ws_out.cell(row=current_row, column=6, value=20)
-                                            ws_out.cell(row=current_row, column=7, value=f"DR{agency_val}")
-                                            ws_out.cell(row=current_row, column=8, value=f"DR{agency_val}")
-                                            ws_out.cell(row=current_row, column=9, value=ref_number)
-                                            ws_out.cell(row=current_row, column=10, value=today_date)
-                                            ws_out.cell(row=current_row, column=11, value=today_date)
-                                            ws_out.cell(row=current_row, column=15, value=item_id)
-                                            ws_out.cell(row=current_row, column=16, value=fg_code)
-                                            ws_out.cell(row=current_row, column=19, value=qty_val)
-                                            ws_out.cell(row=current_row, column=20, value="Bag")
-                                            ws_out.cell(row=current_row, column=22, value=2100)
-                                            ws_out.cell(row=current_row, column=26, value=str(route_num))
-                                            ws_out.cell(row=current_row, column=27, value=agency_val)
-                                            
-                                            item_id += 10
-                                            current_row += 1
-                                    except ValueError:
-                                        pass
-                            if row_has_items:
-                                sales_order_num += 1
-                                file_orders_count += 1
-                                total_orders_created += 1
+                                item_id = 10
+                                row_has_items = False
+                                
+                                for c, fg_code in valid_cols:
+                                    sku_qty = df_input.iloc[r, c]
+                                    if pd.notna(sku_qty) and str(sku_qty).strip() != "":
+                                        try:
+                                            qty_val = float(sku_qty)
+                                            if qty_val > 0:
+                                                row_has_items = True
+                                                
+                                                ws_out.cell(row=current_row, column=2, value=sales_order_num)
+                                                ws_out.cell(row=current_row, column=3, value="OR")
+                                                ws_out.cell(row=current_row, column=4, value="SO20")
+                                                ws_out.cell(row=current_row, column=5, value=10)
+                                                ws_out.cell(row=current_row, column=6, value=20)
+                                                ws_out.cell(row=current_row, column=7, value=f"DR{agency_val}")
+                                                ws_out.cell(row=current_row, column=8, value=f"DR{agency_val}")
+                                                ws_out.cell(row=current_row, column=9, value=ref_number)
+                                                ws_out.cell(row=current_row, column=10, value=today_date)
+                                                ws_out.cell(row=current_row, column=11, value=today_date)
+                                                ws_out.cell(row=current_row, column=15, value=item_id)
+                                                ws_out.cell(row=current_row, column=16, value=fg_code)
+                                                ws_out.cell(row=current_row, column=19, value=qty_val)
+                                                ws_out.cell(row=current_row, column=20, value="Bag")
+                                                ws_out.cell(row=current_row, column=22, value=2100)
+                                                ws_out.cell(row=current_row, column=26, value=str(route_num))
+                                                ws_out.cell(row=current_row, column=27, value=agency_val)
+                                                
+                                                item_id += 10
+                                                current_row += 1
+                                        except ValueError:
+                                            pass
+                                if row_has_items:
+                                    sales_order_num += 1
+                                    file_orders_count += 1
+                                    total_orders_created += 1
 
                     # Save output file to memory buffer
                     output_buffer = io.BytesIO()
@@ -202,7 +208,6 @@ if st.button("🚀 Process Batch Orders", type="primary"):
 
                     out_filename = f"{safe_route_num}_{today_date}_{timestamp}.xlsx"
                     
-                    # Store in session state so buttons don't disappear
                     st.session_state.processed_files.append({
                         "name": short_filename,
                         "data": output_buffer.getvalue(),
