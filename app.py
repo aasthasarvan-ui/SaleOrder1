@@ -34,13 +34,18 @@ st.title("📊 Sales Order Automation Hub")
 st.markdown("Upload multiple **Inbound Demand Files** to process orders in batch (Template is loaded from GitHub automatically).")
 st.markdown("---")
 
-# File Upload Section (Sirf Input Files - Template Hata Diya Gaya Hai)
+# Session State for persistent download buttons
+if 'processed_files' not in st.session_state:
+    st.session_state.processed_files = []
+
+# File Upload Section
 uploaded_inputs = st.file_uploader("Upload Multiple Demand Excel Files", type=["xlsx", "xls"], accept_multiple_files=True, key="inputs")
 
 st.markdown("<br>", unsafe_allow_html=True)
 
 if st.button("🚀 Process Batch Orders", type="primary"):
     if uploaded_inputs:
+        st.session_state.processed_files = []
         with st.spinner("⚡ Fetching template from GitHub and processing files... Please wait."):
             try:
                 # GitHub se Output.xlsx ka RAW link
@@ -95,37 +100,24 @@ if st.button("🚀 Process Batch Orders", type="primary"):
 
                     safe_route_num = "".join(c if c.isalnum() or c in ('-', '_') else "-" for c in str(route_num))
 
-                    # 3. Advanced Agency Detection
-                    agency_col = 0
-                    for cSearch in range(fg_col):
-                        head_cell = str(df_input.iloc[fg_row - 1, cSearch] if fg_row > 0 else "")
-                        head_clean = head_cell.upper().replace("\n", "").replace(" ", "")
-                        if "AG" in head_clean and "SALES" not in head_clean:
+                    # 3. Exact Agency Detection (FG ke left ki taraf pehla non-sequential numerical column)
+                    agency_col = -1
+                    for cSearch in range(fg_col - 1, -1, -1):
+                        numeric_count = 0
+                        for rCheck in range(fg_row + 1, df_input.shape[0]):
+                            v = df_input.iloc[rCheck, cSearch]
+                            if pd.notna(v) and str(v).strip() != "":
+                                clean_v = str(v).replace('.0', '').strip()
+                                if clean_v.isdigit():
+                                    numeric_count += 1
+                        
+                        if numeric_count > 0:
                             agency_col = cSearch
                             break
 
-                    if agency_col == 0:
-                        for col in range(fg_col):
-                            header_text = str(df_input.iloc[fg_row - 1, col] if fg_row > 0 else "") + " " + str(df_input.iloc[fg_row, col])
-                            header_text = header_text.upper()
-                            if any(x in header_text for x in ["SR", "SERIAL", "S.NO", "NO"]):
-                                continue
-                            
-                            is_numeric = True
-                            count_num = 0
-                            for i in range(fg_row + 1, df_input.shape[0]):
-                                v = df_input.iloc[i, col]
-                                if pd.notna(v) and str(v).strip() != "":
-                                    if not str(v).replace('.0','').isdigit():
-                                        is_numeric = False
-                                        break
-                                    count_num += 1
-                            if is_numeric and count_num > 0:
-                                agency_col = col
-                                break
-
-                    if agency_col == 0:
-                        agency_col = 2  # default fallback
+                    # Fallback agar column na mile toh FG ka theek pehla column
+                    if agency_col == -1 and fg_col > 0:
+                        agency_col = fg_col - 1
 
                     # 4. Strict Valid FG Columns (Excluding Total & Remarks)
                     valid_cols = []
@@ -146,11 +138,12 @@ if st.button("🚀 Process Batch Orders", type="primary"):
 
                     # 6. Data Mapping and Injection (with Unique Reference Logic)
                     agency_counts = {}
+                    file_orders_count = 0
 
                     for r in range(fg_row + 1, df_input.shape[0]):
-                        agency = df_input.iloc[r, agency_col]
+                        agency = df_input.iloc[r, agency_col] if agency_col >= 0 else None
                         if pd.notna(agency) and str(agency).strip() != "" and str(agency).replace('.0','').isdigit():
-                            agency_val = int(float(agency))
+                            agency_val = int(float(str(agency).replace('.0','')))
                             
                             if agency_val in agency_counts:
                                 agency_counts[agency_val] += 1
@@ -199,6 +192,7 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                                         pass
                             if row_has_items:
                                 sales_order_num += 1
+                                file_orders_count += 1
                                 total_orders_created += 1
 
                     # Save output file to memory buffer
@@ -208,21 +202,36 @@ if st.button("🚀 Process Batch Orders", type="primary"):
 
                     out_filename = f"{safe_route_num}_{today_date}_{timestamp}.xlsx"
                     
-                    st.success(f"✅ Processed: {short_filename} -> Orders created: {sales_order_num-1}")
-                    
-                    st.download_button(
-                        label=f"📥 Download Output for {short_filename}",
-                        data=output_buffer,
-                        file_name=out_filename,
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        key=out_filename
-                    )
+                    # Store in session state so buttons don't disappear
+                    st.session_state.processed_files.append({
+                        "name": short_filename,
+                        "data": output_buffer.getvalue(),
+                        "filename": out_filename,
+                        "orders": file_orders_count
+                    })
                     total_processed += 1
 
-                st.markdown("---")
-                st.info(f"📊 **Batch Summary:** Total Files Processed: {total_processed} | Total Orders Generated: {total_orders_created}")
+                st.success("✅ Batch Processing Complete!")
 
             except Exception as e:
                 st.error(f"❌ Error aagaya: {e}")
-    else:
-        st.warning("⚠️ Kripya pehle demand files upload karein!")
+
+# Display persistent download buttons and summary from Session State
+if st.session_state.processed_files:
+    st.markdown("---")
+    for item in st.session_state.processed_files:
+        st.success(f"✅ Processed: {item['name']} -> Orders created: {item['orders']}")
+        st.download_button(
+            label=f"📥 Download Output for {item['name']}",
+            data=item['data'],
+            file_name=item['filename'],
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key=item['filename']
+        )
+    
+    st.markdown("---")
+    total_files_count = len(st.session_state.processed_files)
+    total_gen_orders = sum(item['orders'] for item in st.session_state.processed_files)
+    st.info(f"📊 **Batch Summary:** Total Files Processed: {total_files_count} | Total Orders Generated: {total_gen_orders}")
+else:
+    st.warning("⚠️ Kripya pehle demand files upload karein!")
