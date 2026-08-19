@@ -1,3 +1,43 @@
+import streamlit as st
+import pandas as pd
+import openpyxl
+import datetime
+import io
+import requests
+
+# Page Configuration & Styling
+st.set_page_config(
+    page_title="Sales Order Automation Hub", 
+    page_icon="🚀", 
+    layout="centered"
+)
+
+st.markdown("""
+    <style>
+        .stButton>button {
+            width: 100%;
+            background-color: #10b981 !important;
+            color: #ffffff !important;
+            font-size: 16px;
+            font-weight: 700;
+            padding: 14px;
+            border-radius: 8px;
+            border: none;
+        }
+        .stButton>button:hover {
+            background-color: #059669 !important;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
+st.title("📊 Sales Order Automation Hub")
+st.markdown("Upload multiple **Inbound Demand Files** to process orders in batch (Template is loaded from GitHub automatically).")
+st.markdown("---")
+
+# Session State for persistent download buttons
+if 'processed_files' not in st.session_state:
+    st.session_state.processed_files = []
+
 # File Upload Section
 uploaded_inputs = st.file_uploader("Upload Multiple Demand Excel Files", type=["xlsx", "xls"], accept_multiple_files=True, key="inputs")
 
@@ -141,7 +181,7 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                                     sku_qty = df_input.iloc[r, c]
                                     if pd.notna(sku_qty) and str(sku_qty).strip() != "":
                                         try:
-                                            qty_val =float(sku_qty)
+                                            qty_val = float(sku_qty)
                                             if qty_val > 0:
                                                 row_has_items = True
                                                 
@@ -196,7 +236,6 @@ if st.button("🚀 Process Batch Orders", type="primary"):
             except Exception as e:
                 st.error("❌ Error aagaya: " + str(e))
     else:
-        # Yahin par warning aayegi jab file upload kiye bina button dabaya jayega
         st.warning("⚠️ Kripya pehle demand files upload karein!")
 
 # Display persistent download buttons and summary from Session State
