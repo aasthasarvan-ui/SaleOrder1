@@ -139,7 +139,6 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                     for cSearch in range(fg_col - 1, -1, -1):
                         valid_agency_count = 0
                         
-                        # A. Header Check for Serial/Sequence labels
                         header_val = str(df_input.iloc[fg_row, cSearch] if fg_row >= 0 else "").strip().upper()
                         if any(s in header_val for s in ["S.NO", "SR", "NO.", "INDEX", "SEQ"]):
                             continue 
@@ -153,12 +152,11 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                                     extracted_numbers.append(int(clean_v))
                                     valid_agency_count += 1
                         
-                        # B. Check if extracted numbers form a sequential series (1, 2, 3...)
                         if len(extracted_numbers) > 2:
                             is_sequential = all(extracted_numbers[i] < extracted_numbers[i+1] for i in range(len(extracted_numbers)-1))
                             first_num = extracted_numbers[0]
                             if is_sequential and (first_num == 1 or first_num == 0):
-                                continue # Yeh serial number column hai, skip karo!
+                                continue 
 
                         if valid_agency_count > 0:
                             agency_col = cSearch
@@ -167,7 +165,7 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                     if agency_col == -1 and fg_col > 0:
                         agency_col = fg_col - 1
 
-                    # 4.1 Enhanced DR Code Column Detection (Scanning values for 'DR' keyword regardless of header)
+                    # 4.1 DR Code Column Detection
                     dr_code_col = -1
                     for cSearch in range(fg_col - 1, -1, -1):
                         dr_match_count = 0
@@ -175,7 +173,6 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                             val_check = df_input.iloc[rCheck, cSearch]
                             if pd.notna(val_check) and str(val_check).strip() != "":
                                 str_val = str(val_check).strip().upper()
-                                # Check if cell value contains 'DR' (e.g. DR10415)
                                 if "DR" in str_val:
                                     dr_match_count += 1
                         
@@ -189,14 +186,23 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                         fg_code = str(df_input.iloc[fg_row, c] if fg_row >= 0 else "").strip()
                         valid_cols.append((c, fg_code))
 
-                    # 6. Load Template
-                    wb_out = openpyxl.load_workbook(io.BytesIO(template_bytes))
-                    ws_out = wb_out["Order Data"] if "Order Data" in wb_out.sheetnames else wb_out.active
+                    # 6. Load Template for Valid DR Orders & Missing DR Orders separately
+                    wb_valid = openpyxl.load_workbook(io.BytesIO(template_bytes))
+                    ws_valid = wb_valid["Order Data"] if "Order Data" in wb_valid.sheetnames else wb_valid.active
 
-                    current_row = 6
-                    sales_order_num = 1
-                    agency_counts = {}
-                    file_orders_count = 0
+                    wb_missing = openpyxl.load_workbook(io.BytesIO(template_bytes))
+                    ws_missing = wb_missing["Order Data"] if "Order Data" in wb_missing.sheetnames else wb_missing.active
+
+                    valid_row = 6
+                    missing_row = 6
+                    valid_order_num = 1
+                    missing_order_num = 1
+                    
+                    agency_counts_valid = {}
+                    agency_counts_missing = {}
+                    
+                    valid_items_created = 0
+                    missing_items_created = 0
 
                     for r in range(fg_row + 1, df_input.shape[0]):
                         agency = df_input.iloc[r, agency_col] if agency_col >= 0 else None
@@ -204,20 +210,37 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                             agency_str = str(agency).replace('.0','').strip()
                             if agency_str.isdigit() and 1 <= len(agency_str) <= 5:
                                 agency_val = int(agency_str)
-                                agency_counts[agency_val] = agency_counts.get(agency_val, 0) + 1
-                                current_agency_seq = agency_counts[agency_val]
                                 
-                                # SAP Search-friendly Reference Number format: RT-{Route}-{Agency}-{Date}
-                                ref_number = f"RT-{route_num}-{agency_val}-{today_date}" if current_agency_seq == 1 else f"RT-{route_num}-{agency_val}-{today_date}-{current_agency_seq}"
-
-                                # Extract DR Code from detected column, otherwise fallback to DR{agency_val}
-                                dr_val_to_use = f"DR{agency_val}"
+                                # Check if DR Code exists for this row
+                                has_dr_code = False
+                                clean_dr = ""
                                 if dr_code_col >= 0:
                                     raw_dr = df_input.iloc[r, dr_code_col]
                                     if pd.notna(raw_dr) and str(raw_dr).strip() != "":
                                         clean_dr = str(raw_dr).replace('.0', '').strip()
-                                        if clean_dr.upper() != "NAN":
-                                            dr_val_to_use = clean_dr
+                                        if clean_dr.upper() != "NAN" and clean_dr != "":
+                                            has_dr_code = True
+
+                                # Route based on DR Code presence
+                                if has_dr_code:
+                                    agency_counts_valid[agency_val] = agency_counts_valid.get(agency_val, 0) + 1
+                                    current_seq = agency_counts_valid[agency_val]
+                                    ref_number = f"RT-{route_num}-{agency_val}-{today_date}" if current_seq == 1 else f"RT-{route_num}-{agency_val}-{today_date}-{current_seq}"
+                                    
+                                    target_ws = ws_valid
+                                    current_r = valid_row
+                                    order_num = valid_order_num
+                                    dr_to_use = clean_dr
+                                else:
+                                    # Missing DR Code (New Customer Case)
+                                    agency_counts_missing[agency_val] = agency_counts_missing.get(agency_val, 0) + 1
+                                    current_seq = agency_counts_missing[agency_val]
+                                    ref_number = f"RT-{route_num}-{agency_val}-{today_date}-NEW" if current_seq == 1 else f"RT-{route_num}-{agency_val}-{today_date}-NEW-{current_seq}"
+                                    
+                                    target_ws = ws_missing
+                                    current_r = missing_row
+                                    order_num = missing_order_num
+                                    dr_to_use = f"NEW_CUST_{agency_val}" # Placeholder for missing DR
 
                                 item_id = 10
                                 row_has_items = False
@@ -231,43 +254,63 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                                                 row_has_items = True
                                                 current_fg = fg_code if (fg_code != "" and fg_code.lower() != "nan" and fg_code.upper().startswith("FG")) else "FG500014"
                                                 
-                                                ws_out.cell(row=current_row, column=2, value=sales_order_num)
-                                                ws_out.cell(row=current_row, column=3, value="OR")
-                                                ws_out.cell(row=current_row, column=4, value="SO20")
-                                                ws_out.cell(row=current_row, column=5, value=10)
-                                                ws_out.cell(row=current_row, column=6, value=20)
-                                                ws_out.cell(row=current_row, column=7, value=dr_val_to_use) # Insert DR Code in Col G
-                                                ws_out.cell(row=current_row, column=8, value=dr_val_to_use) # Insert DR Code in Col H
-                                                ws_out.cell(row=current_row, column=9, value=ref_number) 
-                                                ws_out.cell(row=current_row, column=10, value=today_date)
-                                                ws_out.cell(row=current_row, column=11, value=today_date)
-                                                ws_out.cell(row=current_row, column=15, value=item_id)
-                                                ws_out.cell(row=current_row, column=16, value=current_fg)
-                                                ws_out.cell(row=current_row, column=19, value=qty_val)
-                                                ws_out.cell(row=current_row, column=20, value="Bag")
-                                                ws_out.cell(row=current_row, column=22, value=2100)
-                                                ws_out.cell(row=current_row, column=26, value=str(route_num))
-                                                ws_out.cell(row=current_row, column=27, value=agency_val)
+                                                target_ws.cell(row=current_r, column=2, value=order_num)
+                                                target_ws.cell(row=current_r, column=3, value="OR")
+                                                target_ws.cell(row=current_r, column=4, value="SO20")
+                                                target_ws.cell(row=current_r, column=5, value=10)
+                                                target_ws.cell(row=current_r, column=6, value=20)
+                                                target_ws.cell(row=current_r, column=7, value=dr_to_use)
+                                                target_ws.cell(row=current_r, column=8, value=dr_to_use)
+                                                target_ws.cell(row=current_r, column=9, value=ref_number)
+                                                target_ws.cell(row=current_r, column=10, value=today_date)
+                                                target_ws.cell(row=current_r, column=11, value=today_date)
+                                                target_ws.cell(row=current_r, column=15, value=item_id)
+                                                target_ws.cell(row=current_r, column=16, value=current_fg)
+                                                target_ws.cell(row=current_r, column=19, value=qty_val)
+                                                target_ws.cell(row=current_r, column=20, value="Bag")
+                                                target_ws.cell(row=current_r, column=22, value=2100)
+                                                target_ws.cell(row=current_r, column=26, value=str(route_num))
+                                                target_ws.cell(row=current_r, column=27, value=agency_val)
                                                 
                                                 item_id += 10
-                                                current_row += 1
+                                                current_r += 1
                                         except ValueError:
                                             pass
+                                
                                 if row_has_items:
-                                    sales_order_num += 1
-                                    file_orders_count += 1
-                                    total_orders_created += 1
+                                    if has_dr_code:
+                                        valid_row = current_r
+                                        valid_order_num += 1
+                                        valid_items_created += 1
+                                    else:
+                                        missing_row = current_r
+                                        missing_order_num += 1
+                                        missing_items_created += 1
 
-                    output_buffer = io.BytesIO()
-                    wb_out.save(output_buffer)
-                    output_buffer.seek(0)
-                    
-                    st.session_state.processed_files.append({
-                        "name": short_filename,
-                        "data": output_buffer.getvalue(),
-                        "filename": safe_route_num + "_" + today_date + "_" + timestamp + ".xlsx",
-                        "orders": file_orders_count
-                    })
+                    # Save Valid DR File if items created
+                    if valid_items_created > 0:
+                        buf_valid = io.BytesIO()
+                        wb_valid.save(buf_valid)
+                        buf_valid.seek(0)
+                        st.session_state.processed_files.append({
+                            "name": short_filename + " (Valid DR)",
+                            "data": buf_valid.getvalue(),
+                            "filename": safe_route_num + "_" + today_date + "_" + timestamp + "_Valid.xlsx",
+                            "orders": valid_items_created
+                        })
+
+                    # Save Missing DR File if items created
+                    if missing_items_created > 0:
+                        buf_missing = io.BytesIO()
+                        wb_missing.save(buf_missing)
+                        buf_missing.seek(0)
+                        st.session_state.processed_files.append({
+                            "name": short_filename + " (Missing DR / New Customer)",
+                            "data": buf_missing.getvalue(),
+                            "filename": safe_route_num + "_" + today_date + "_" + timestamp + "_Missing_DR.xlsx",
+                            "orders": missing_items_created
+                        })
+
                     total_processed += 1
 
                 st.success("✅ Batch Processing Complete!")
@@ -283,7 +326,7 @@ if st.session_state.processed_files:
     for item in st.session_state.processed_files:
         st.success("✅ Processed: " + item['name'] + " -> Orders created: " + str(item['orders']))
         if st.download_button(
-            label="📥 Download Output for " + item['name'],
+            label="📥 Download " + item['name'],
             data=item['data'],
             file_name=item['filename'],
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -292,4 +335,4 @@ if st.session_state.processed_files:
             st.toast(f"🎉 '{item['filename']}' successfully download ho gaya hai!", icon="📥")
     
     st.markdown("---")
-    st.info("📊 **Batch Summary:** Total Files: " + str(len(st.session_state.processed_files)) + " | Total Orders: " + str(sum(item['orders'] for item in st.session_state.processed_files)))
+    st.info("📊 **Batch Summary:** Total Output Files Generated: " + str(len(st.session_state.processed_files)))
