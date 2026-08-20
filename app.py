@@ -167,6 +167,27 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                     if agency_col == -1 and fg_col > 0:
                         agency_col = fg_col - 1
 
+                    # 4.1 New Logic: Detect DR Code Column on Left of FG (e.g. values like DR10415)
+                    dr_code_col = -1
+                    for cSearch in range(fg_col - 1, -1, -1):
+                        dr_match_count = 0
+                        header_txt = str(df_input.iloc[fg_row, cSearch] if fg_row >= 0 else "").strip().upper()
+                        header_prev = str(df_input.iloc[fg_row - 1, cSearch] if fg_row > 0 else "").strip().upper()
+                        
+                        # Check if header contains DR keyword or if data values start with DR
+                        is_dr_header = "DR" in header_txt or "DR" in header_prev or "DISTRIBUTOR" in header_txt or "CUSTOMER" in header_txt
+                        
+                        for rCheck in range(fg_row + 1, df_input.shape[0]):
+                            val_check = df_input.iloc[rCheck, cSearch]
+                            if pd.notna(val_check) and str(val_check).strip() != "":
+                                str_val = str(val_check).strip().upper()
+                                if str_val.startswith("DR") or is_dr_header:
+                                    dr_match_count += 1
+                        
+                        if dr_match_count > 0:
+                            dr_code_col = cSearch
+                            break
+
                     # 5. Valid FG Columns
                     valid_cols = []
                     for c in range(fg_col, total_col):
@@ -194,6 +215,15 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                                 # SAP Search-friendly Reference Number format: RT-{Route}-{Agency}-{Date}
                                 ref_number = f"RT-{route_num}-{agency_val}-{today_date}" if current_agency_seq == 1 else f"RT-{route_num}-{agency_val}-{today_date}-{current_agency_seq}"
 
+                                # Extract DR Code if column found, otherwise fallback to DR{agency_val}
+                                dr_val_to_use = f"DR{agency_val}"
+                                if dr_code_col >= 0:
+                                    raw_dr = df_input.iloc[r, dr_code_col]
+                                    if pd.notna(raw_dr) and str(raw_dr).strip() != "":
+                                        clean_dr = str(raw_dr).replace('.0', '').strip()
+                                        if clean_dr.upper() != "NAN":
+                                            dr_val_to_use = clean_dr
+
                                 item_id = 10
                                 row_has_items = False
                                 
@@ -211,9 +241,9 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                                                 ws_out.cell(row=current_row, column=4, value="SO20")
                                                 ws_out.cell(row=current_row, column=5, value=10)
                                                 ws_out.cell(row=current_row, column=6, value=20)
-                                                ws_out.cell(row=current_row, column=7, value=f"DR{agency_val}")
-                                                ws_out.cell(row=current_row, column=8, value=f"DR{agency_val}")
-                                                ws_out.cell(row=current_row, column=9, value=ref_number) # Updated SAP Searchable Ref
+                                                ws_out.cell(row=current_row, column=7, value=dr_val_to_use) # Insert DR Code in Col G
+                                                ws_out.cell(row=current_row, column=8, value=dr_val_to_use) # Insert DR Code in Col H
+                                                ws_out.cell(row=current_row, column=9, value=ref_number) 
                                                 ws_out.cell(row=current_row, column=10, value=today_date)
                                                 ws_out.cell(row=current_row, column=11, value=today_date)
                                                 ws_out.cell(row=current_row, column=15, value=item_id)
@@ -268,4 +298,3 @@ if st.session_state.processed_files:
     
     st.markdown("---")
     st.info("📊 **Batch Summary:** Total Files: " + str(len(st.session_state.processed_files)) + " | Total Orders: " + str(sum(item['orders'] for item in st.session_state.processed_files)))
-
