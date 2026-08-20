@@ -268,3 +268,4 @@ if st.session_state.processed_files:
     
     st.markdown("---")
     st.info("📊 **Batch Summary:** Total Files: " + str(len(st.session_state.processed_files)) + " | Total Orders: " + str(sum(item['orders'] for item in st.session_state.processed_files)))
+
