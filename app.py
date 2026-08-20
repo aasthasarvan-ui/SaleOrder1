@@ -134,7 +134,7 @@ if st.button("🚀 Process Batch Orders", type="primary"):
 
                     safe_route_num = "".join(c if c.isalnum() or c in ('-', '_') else "-" for c in str(route_num))
 
-                    # 4. Smart Agency Detection (Updated with Serial/Sequence Number Filtering)
+                    # 4. Smart Agency Detection (With Serial/Sequence Number Filtering)
                     agency_col = -1
                     for cSearch in range(fg_col - 1, -1, -1):
                         valid_agency_count = 0
@@ -190,7 +190,9 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                                 agency_val = int(agency_str)
                                 agency_counts[agency_val] = agency_counts.get(agency_val, 0) + 1
                                 current_agency_seq = agency_counts[agency_val]
-                                ref_number = f"REF-{agency_val}-{today_date}" if current_agency_seq == 1 else f"REF-{agency_val}-{today_date}-{current_agency_seq}"
+                                
+                                # SAP Search-friendly Reference Number format: RT-{Route}-{Agency}-{Date}
+                                ref_number = f"RT-{route_num}-{agency_val}-{today_date}" if current_agency_seq == 1 else f"RT-{route_num}-{agency_val}-{today_date}-{current_agency_seq}"
 
                                 item_id = 10
                                 row_has_items = False
@@ -211,7 +213,7 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                                                 ws_out.cell(row=current_row, column=6, value=20)
                                                 ws_out.cell(row=current_row, column=7, value=f"DR{agency_val}")
                                                 ws_out.cell(row=current_row, column=8, value=f"DR{agency_val}")
-                                                ws_out.cell(row=current_row, column=9, value=ref_number)
+                                                ws_out.cell(row=current_row, column=9, value=ref_number) # Updated SAP Searchable Ref
                                                 ws_out.cell(row=current_row, column=10, value=today_date)
                                                 ws_out.cell(row=current_row, column=11, value=today_date)
                                                 ws_out.cell(row=current_row, column=15, value=item_id)
