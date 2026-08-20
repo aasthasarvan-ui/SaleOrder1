@@ -3,6 +3,7 @@ import pandas as pd
 import openpyxl
 import datetime
 import io
+import re
 
 # Page Configuration & Styling
 st.set_page_config(
@@ -129,7 +130,7 @@ if st.button("🚀 Process Batch Orders", type="primary"):
 
                     safe_route_num = "".join(c if c.isalnum() or c in ('-', '_') else "-" for c in str(route_num))
 
-                    # 4. Smart Agency Detection
+                    # 4. Smart Agency Detection (With Serial/Sequence Number Filtering)
                     agency_col = -1
                     for cSearch in range(fg_col - 1, -1, -1):
                         valid_agency_count = 0
@@ -160,18 +161,22 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                     if agency_col == -1 and fg_col > 0:
                         agency_col = fg_col - 1
 
-                    # 4.1 DR Code Column Detection
+                    # 4.1 Strict DR Code Column Detection (Starting right below FG Row, format: DR + Numbers)
                     dr_code_col = -1
                     for cSearch in range(fg_col - 1, -1, -1):
-                        dr_match_count = 0
-                        for rCheck in range(fg_row + 1, df_input.shape[0]):
-                            val_check = df_input.iloc[rCheck, cSearch]
-                            if pd.notna(val_check) and str(val_check).strip() != "":
-                                str_val = str(val_check).strip().upper()
-                                if "DR" in str_val:
-                                    dr_match_count += 1
+                        sample_val = str(df_input.iloc[fg_row + 1, cSearch] if fg_row + 1 < df_input.shape[0] else "").strip().upper()
                         
-                        if dr_match_count > 0:
+                        if re.match(r'^DR\d+', sample_val):
+                            dr_code_col = cSearch
+                            break
+                        
+                        matched_count = 0
+                        for offset in range(1, min(4, df_input.shape[0] - fg_row)):
+                            v = str(df_input.iloc[fg_row + offset, cSearch]).strip().upper()
+                            if re.match(r'^DR\d+', v):
+                                matched_count += 1
+                        
+                        if matched_count > 0:
                             dr_code_col = cSearch
                             break
 
@@ -181,7 +186,7 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                         fg_code = str(df_input.iloc[fg_row, c] if fg_row >= 0 else "").strip()
                         valid_cols.append((c, fg_code))
 
-                    # 6. Load Template for Valid & Missing DR Orders
+                    # 6. Load Template for Valid & Missing DR Orders separately
                     wb_valid = openpyxl.load_workbook(io.BytesIO(template_bytes))
                     ws_valid = wb_valid["Order Data"] if "Order Data" in wb_valid.sheetnames else wb_valid.active
 
@@ -206,6 +211,7 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                             if agency_str.isdigit() and 1 <= len(agency_str) <= 5:
                                 agency_val = int(agency_str)
                                 
+                                # Check if DR Code exists for this row
                                 has_dr_code = False
                                 clean_dr = ""
                                 if dr_code_col >= 0:
@@ -215,6 +221,7 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                                         if clean_dr.upper() != "NAN" and clean_dr != "":
                                             has_dr_code = True
 
+                                # Route based on DR Code presence
                                 if has_dr_code:
                                     agency_counts_valid[agency_val] = agency_counts_valid.get(agency_val, 0) + 1
                                     current_seq = agency_counts_valid[agency_val]
@@ -225,6 +232,7 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                                     order_num = valid_order_num
                                     dr_to_use = clean_dr
                                 else:
+                                    # Missing DR Code (New Customer Case)
                                     agency_counts_missing[agency_val] = agency_counts_missing.get(agency_val, 0) + 1
                                     current_seq = agency_counts_missing[agency_val]
                                     ref_number = f"RT-{route_num}-{agency_val}-{today_date}-NEW" if current_seq == 1 else f"RT-{route_num}-{agency_val}-{today_date}-NEW-{current_seq}"
