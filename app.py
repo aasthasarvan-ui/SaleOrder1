@@ -167,21 +167,16 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                     if agency_col == -1 and fg_col > 0:
                         agency_col = fg_col - 1
 
-                    # 4.1 New Logic: Detect DR Code Column on Left of FG (e.g. values like DR10415)
+                    # 4.1 Enhanced DR Code Column Detection (Scanning values for 'DR' keyword regardless of header)
                     dr_code_col = -1
                     for cSearch in range(fg_col - 1, -1, -1):
                         dr_match_count = 0
-                        header_txt = str(df_input.iloc[fg_row, cSearch] if fg_row >= 0 else "").strip().upper()
-                        header_prev = str(df_input.iloc[fg_row - 1, cSearch] if fg_row > 0 else "").strip().upper()
-                        
-                        # Check if header contains DR keyword or if data values start with DR
-                        is_dr_header = "DR" in header_txt or "DR" in header_prev or "DISTRIBUTOR" in header_txt or "CUSTOMER" in header_txt
-                        
                         for rCheck in range(fg_row + 1, df_input.shape[0]):
                             val_check = df_input.iloc[rCheck, cSearch]
                             if pd.notna(val_check) and str(val_check).strip() != "":
                                 str_val = str(val_check).strip().upper()
-                                if str_val.startswith("DR") or is_dr_header:
+                                # Check if cell value contains 'DR' (e.g. DR10415)
+                                if "DR" in str_val:
                                     dr_match_count += 1
                         
                         if dr_match_count > 0:
@@ -215,7 +210,7 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                                 # SAP Search-friendly Reference Number format: RT-{Route}-{Agency}-{Date}
                                 ref_number = f"RT-{route_num}-{agency_val}-{today_date}" if current_agency_seq == 1 else f"RT-{route_num}-{agency_val}-{today_date}-{current_agency_seq}"
 
-                                # Extract DR Code if column found, otherwise fallback to DR{agency_val}
+                                # Extract DR Code from detected column, otherwise fallback to DR{agency_val}
                                 dr_val_to_use = f"DR{agency_val}"
                                 if dr_code_col >= 0:
                                     raw_dr = df_input.iloc[r, dr_code_col]
