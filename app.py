@@ -106,7 +106,7 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                             total_col = cSearch
                             break
 
-                    # 3. Final Corrected Route Number Finding Logic (Aapke bataye examples ke mutabiq)
+                    # 3. Route Number Finding Logic
                     route_num = "22"
                     ignore_list = ["RT", "DR", "RT DR", "ROUTE", "SALES PERSON", "CONTACT NO:", "MATERIAL CODE"]
                     
@@ -119,12 +119,12 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                             if upper_val in ignore_list:
                                 continue
                                 
-                            # B. Ignore Product Codes (MS, PC, GM, DP, M, SKU, FG etc.)
+                            # B. Ignore Product Codes
                             is_product_code = any(upper_val.startswith(p) for p in ["PC", "MS", "M", "GM", "DP", "SKU", "FG"])
                             if is_product_code:
                                 continue
                             
-                            # C. Route format: 1-5 chars (with space support like "A 13"), must contain at least one digit
+                            # C. Route format: 1-5 chars, must contain at least one digit
                             if cell_val != "" and 1 <= len(cell_val) <= 5:
                                 if any(char.isdigit() for char in cell_val):
                                     route_num = cell_val
@@ -134,17 +134,32 @@ if st.button("🚀 Process Batch Orders", type="primary"):
 
                     safe_route_num = "".join(c if c.isalnum() or c in ('-', '_') else "-" for c in str(route_num))
 
-                    # 4. Smart Agency Detection (1 to 5 chars length check)
+                    # 4. Smart Agency Detection (Updated with Serial/Sequence Number Filtering)
                     agency_col = -1
                     for cSearch in range(fg_col - 1, -1, -1):
                         valid_agency_count = 0
+                        
+                        # A. Header Check for Serial/Sequence labels
+                        header_val = str(df_input.iloc[fg_row, cSearch] if fg_row >= 0 else "").strip().upper()
+                        if any(s in header_val for s in ["S.NO", "SR", "NO.", "INDEX", "SEQ"]):
+                            continue 
+
+                        extracted_numbers = []
                         for rCheck in range(fg_row + 1, df_input.shape[0]):
                             v = df_input.iloc[rCheck, cSearch]
                             if pd.notna(v) and str(v).strip() != "":
                                 clean_v = str(v).replace('.0', '').strip()
                                 if clean_v.isdigit() and 1 <= len(clean_v) <= 5:
+                                    extracted_numbers.append(int(clean_v))
                                     valid_agency_count += 1
                         
+                        # B. Check if extracted numbers form a sequential series (1, 2, 3...)
+                        if len(extracted_numbers) > 2:
+                            is_sequential = all(extracted_numbers[i] < extracted_numbers[i+1] for i in range(len(extracted_numbers)-1))
+                            first_num = extracted_numbers[0]
+                            if is_sequential and (first_num == 1 or first_num == 0):
+                                continue # Yeh serial number column hai, skip karo!
+
                         if valid_agency_count > 0:
                             agency_col = cSearch
                             break
