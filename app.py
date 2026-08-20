@@ -3,7 +3,6 @@ import pandas as pd
 import openpyxl
 import datetime
 import io
-import requests
 
 # Page Configuration & Styling
 st.set_page_config(
@@ -14,6 +13,7 @@ st.set_page_config(
 
 st.markdown("""
     <style>
+        #GithubIcon { visibility: hidden; }
         .stButton>button {
             width: 100%;
             background-color: #10b981 !important;
@@ -31,7 +31,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("📊 Sales Order Automation Hub")
-st.markdown("Upload multiple **Inbound Demand Files** to process orders in batch (Template is loaded from GitHub automatically).")
+st.markdown("Upload multiple **Inbound Demand Files** to process orders in batch (Template is loaded locally).")
 st.markdown("---")
 
 # Session State for persistent download buttons
@@ -46,16 +46,14 @@ st.markdown("<br>", unsafe_allow_html=True)
 if st.button("🚀 Process Batch Orders", type="primary"):
     if uploaded_inputs:
         st.session_state.processed_files = []
-        with st.spinner("⚡ Fetching template from GitHub and processing files... Please wait."):
+        with st.spinner("⚡ Reading template and processing files... Please wait."):
             try:
-                # GitHub se Output.xlsx ka RAW link
-                github_template_url = "https://raw.githubusercontent.com/aasthasarvan-ui/SaleOrder1/main/Output.xlsx"
-                
-                response = requests.get(github_template_url)
-                if response.status_code == 200:
-                    template_bytes = response.content
-                else:
-                    st.error("❌ GitHub se template file download nahi ho payi. Kripya URL check karein.")
+                # Private repository ke liye local file read karne ka tareeqa
+                try:
+                    with open("Output.xlsx", "rb") as f:
+                        template_bytes = f.read()
+                except FileNotFoundError:
+                    st.error("❌ 'Output.xlsx' template file repository mein nahi mili. Kripya template file ko GitHub repo ke main folder mein upload karein.")
                     st.stop()
                 
                 total_processed = 0
@@ -115,16 +113,13 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                             cell_val = str(df_input.iloc[r, c]).strip()
                             upper_val = cell_val.upper()
                             
-                            # A. Ignore Labels
                             if upper_val in ignore_list:
                                 continue
                                 
-                            # B. Ignore Product Codes
                             is_product_code = any(upper_val.startswith(p) for p in ["PC", "MS", "M", "GM", "DP", "SKU", "FG"])
                             if is_product_code:
                                 continue
                             
-                            # C. Route format: 1-5 chars, must contain at least one digit
                             if cell_val != "" and 1 <= len(cell_val) <= 5:
                                 if any(char.isdigit() for char in cell_val):
                                     route_num = cell_val
@@ -134,7 +129,7 @@ if st.button("🚀 Process Batch Orders", type="primary"):
 
                     safe_route_num = "".join(c if c.isalnum() or c in ('-', '_') else "-" for c in str(route_num))
 
-                    # 4. Smart Agency Detection (With Serial/Sequence Number Filtering)
+                    # 4. Smart Agency Detection
                     agency_col = -1
                     for cSearch in range(fg_col - 1, -1, -1):
                         valid_agency_count = 0
@@ -186,7 +181,7 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                         fg_code = str(df_input.iloc[fg_row, c] if fg_row >= 0 else "").strip()
                         valid_cols.append((c, fg_code))
 
-                    # 6. Load Template for Valid DR Orders & Missing DR Orders separately
+                    # 6. Load Template for Valid & Missing DR Orders
                     wb_valid = openpyxl.load_workbook(io.BytesIO(template_bytes))
                     ws_valid = wb_valid["Order Data"] if "Order Data" in wb_valid.sheetnames else wb_valid.active
 
@@ -211,7 +206,6 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                             if agency_str.isdigit() and 1 <= len(agency_str) <= 5:
                                 agency_val = int(agency_str)
                                 
-                                # Check if DR Code exists for this row
                                 has_dr_code = False
                                 clean_dr = ""
                                 if dr_code_col >= 0:
@@ -221,7 +215,6 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                                         if clean_dr.upper() != "NAN" and clean_dr != "":
                                             has_dr_code = True
 
-                                # Route based on DR Code presence
                                 if has_dr_code:
                                     agency_counts_valid[agency_val] = agency_counts_valid.get(agency_val, 0) + 1
                                     current_seq = agency_counts_valid[agency_val]
@@ -232,7 +225,6 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                                     order_num = valid_order_num
                                     dr_to_use = clean_dr
                                 else:
-                                    # Missing DR Code (New Customer Case)
                                     agency_counts_missing[agency_val] = agency_counts_missing.get(agency_val, 0) + 1
                                     current_seq = agency_counts_missing[agency_val]
                                     ref_number = f"RT-{route_num}-{agency_val}-{today_date}-NEW" if current_seq == 1 else f"RT-{route_num}-{agency_val}-{today_date}-NEW-{current_seq}"
@@ -240,7 +232,7 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                                     target_ws = ws_missing
                                     current_r = missing_row
                                     order_num = missing_order_num
-                                    dr_to_use = f"NEW_CUST_{agency_val}" # Placeholder for missing DR
+                                    dr_to_use = f"NEW_CUST_{agency_val}"
 
                                 item_id = 10
                                 row_has_items = False
@@ -287,7 +279,6 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                                         missing_order_num += 1
                                         missing_items_created += 1
 
-                    # Save Valid DR File if items created
                     if valid_items_created > 0:
                         buf_valid = io.BytesIO()
                         wb_valid.save(buf_valid)
@@ -299,7 +290,6 @@ if st.button("🚀 Process Batch Orders", type="primary"):
                             "orders": valid_items_created
                         })
 
-                    # Save Missing DR File if items created
                     if missing_items_created > 0:
                         buf_missing = io.BytesIO()
                         wb_missing.save(buf_missing)
@@ -320,7 +310,6 @@ if st.button("🚀 Process Batch Orders", type="primary"):
     else:
         st.warning("⚠️ Kripya pehle demand files upload karein!")
 
-# Display download buttons and toast notification
 if st.session_state.processed_files:
     st.markdown("---")
     for item in st.session_state.processed_files:
